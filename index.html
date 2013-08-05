@@ -1,0 +1,203 @@
+<html>
+<head>
+<title>near</title>
+<style>
+
+.fill {
+    width: 100%;
+    height: 100%;
+}
+
+table {
+    border-collapse: collapse;
+}
+th, td {
+    padding: 0;
+}
+
+.left {
+    float: left;
+}
+
+.right {
+    float: right;
+}
+
+.clear {
+    clear: both;
+}
+
+</style>
+
+</head>
+<body>
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/1.8.3/jquery.min.js"></script>
+<script src="/gl519/jquery.cookie.js"></script>
+<script src="/gl519/index.js"></script>
+<script>
+
+function onError(msg) {
+    alert((msg || 'Oops. Not sure what happened.') + '\n\n' +
+        'Please try refreshing the page.')
+}
+
+g_rpc_version = $.cookie('rpc_version')
+g_rpc_token = $.cookie('rpc_token')
+g_rpc_timer = null
+g_rpc = []
+
+function rpc(func, arg, cb) {
+    if (typeof(arg) == 'function') return rpc(func, null, arg)
+    g_rpc.push({
+        payload : { func : func, arg : arg },
+        cb : cb
+    })
+    if (g_rpc_timer) clearTimeout(g_rpc_timer)
+    g_rpc_timer = setTimeout(function () {
+        g_rpc_timer = null
+        var save_rpc = g_rpc
+        g_rpc = []
+        $.ajax({
+            url : '/rpc/' + g_rpc_version + '/' + g_rpc_token,
+            type : 'post',
+            data : _.json(_.map(save_rpc, function (e) { return e.payload })),
+            success : function (r) {
+                _.each(r, function (r, i) {
+                    if (save_rpc[i].cb)
+                        save_rpc[i].cb(r)
+                })
+            },
+            error : function (s) {
+                onError(s.responseText)
+            }
+        })
+    }, 0)
+}
+
+///
+
+function getUrlParams(url) {
+    if (url === undefined) {
+        url = window.location.href
+    }
+    var params = {}
+    var m = url.match(/\?([^#]+)/)
+    if (m) {
+        _.each(m[1].split(/&/), function (m) {
+            if (m.length > 0) {
+                var a = m.split(/=/)
+                params[_.unescapeUrl(a[0])] = a.length > 1 ? _.unescapeUrl(a[1]) : true
+            }
+        })
+    }
+    return params
+}
+
+var tau = Math.PI * 2
+
+var data = @@@data@@@
+
+function mturkSubmit() {
+    var params = getUrlParams()
+    var f = $('<form action="' + params.turkSubmitTo + '/mturk/externalSubmit" method="GET"><input type="hidden" name="assignmentId" value="' + params.assignmentId + '"></input><input type="hidden" name="unused" value="unused"></input></form>')
+    $('body').append(f)
+    f.submit()
+}
+
+function mturkCheckPreview() {
+    var params = getUrlParams()
+    if (params.assignmentId == "ASSIGNMENT_ID_NOT_AVAILABLE") {
+        _.dialog($('<div style="background-color: rgba(0,0,0,0.5);color:white;font-size:xx-large;padding:10px"/>').text('preview'), false)
+        $('body').click(function () {
+            alert('This is a preview. Please accept the HIT to work on it.')
+        })
+        return true
+    }
+}
+
+function isHIT() {
+    var params = getUrlParams()
+    return !!params.assignmentId
+}
+
+function drawAsk(html, onYes, onNo) {
+    var d = $('<div style="margin-top:10px;width:100%;height:50px"/>')
+    var dd = $('<div style="font-size:large;"/>')
+    dd.html(html)
+    dd.append($('<span>&nbsp;&nbsp;&nbsp;</span>'))
+    dd.append($('<button style="font-size:large;font-family:serif">yes</button>').click(function () {
+        onYes()
+    }))
+    dd.append($('<span>&nbsp;</span>'))
+    dd.append($('<button style="font-size:large;font-family:serif">no</button>').click(function () {
+        onNo()
+    }))
+    
+    var center = $('<table style="width:100%;"><tr><td valign="center" align="center"></td></tr></table>')
+    center.find('td').append(dd)
+    
+    d.append(center)
+    return d
+}
+
+function drawWidget(points) {
+    var d = $('<div style="width:100%"/>')
+    var dd = $('<div style="width:402px;margin:0px auto;"/>')
+    d.append(dd)
+    
+    var c = $('<canvas width="400px" height="400px" style="border:1px solid black" />')
+    var g = c.get()[0].getContext("2d")
+    
+    g.fillStyle = "black"
+    var h = 30
+    g.fillRect(400 / 3, 200 - (h / 2), 400 / 3, h)
+    
+    if (!points) {
+        g.beginPath()
+        var p = data.randomPoint
+        g.arc(p.x, p.y, 5, 0, tau, true) 
+        g.closePath()
+        g.fill()
+        
+        function helper(yes) {
+            rpc('setPoint', { x : p.x, y : p.y, yes : yes }, function (s) {
+                if (isHIT()) {
+                    mturkSubmit()
+                } else {
+                    $('body').empty().append(drawWidget(s))
+                }
+            })
+        }
+    
+        dd.append(drawAsk('is the dot <b>near</b> the bar?', function () {
+            helper(true)
+        }, function () {
+            helper(false)
+        }))
+    } else {
+        _.each(points, function (p) {
+            g.beginPath()
+            g.arc(p.x, p.y, 5, 0, tau, true) 
+            g.closePath()
+            var yes = p.yesses / (p.yesses + p.noes)
+            g.fillStyle = 'rgb(' +
+                Math.floor(_.lerp(0, 200, 1, 255, yes)) + ',' +
+                Math.floor(_.lerp(0, 200, 1, 0, yes)) + ',' +
+                Math.floor(_.lerp(0, 200, 1, 0, yes)) + ')'
+            g.fill()
+        })
+        c.css('margin-top', '52px')
+    }
+    
+    dd.append(c)
+    return d
+}
+
+$(function () {
+    $('body').append(drawWidget(data.points))
+    mturkCheckPreview()
+})
+
+</script>
+</body>
+</html>
